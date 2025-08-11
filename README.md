@@ -4,6 +4,8 @@ A Drizzle ORM driver for Ditto SDK, allowing you to use Drizzle's familiar SQL-l
 
 ## Installation
 
+NOTE: this is not published on NPM yet.
+
 ```bash
 npm install @dittolive/drizzle-driver @dittolive/ditto drizzle-orm
 ```
