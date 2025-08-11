@@ -307,6 +307,3 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 MIT
 
-## Acknowledgments
-
-This driver is inspired by the [@powersync/drizzle-driver](https://github.com/powersync/powersync-js/tree/main/packages/drizzle-driver) implementation.
