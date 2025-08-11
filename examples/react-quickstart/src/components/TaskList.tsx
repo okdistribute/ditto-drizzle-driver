@@ -16,7 +16,7 @@ const TaskItem: React.FC<ItemProps> = React.memo(
     const handleEdit = () => {
       const trimmedTitle = editedTitle.trim();
       if (trimmedTitle === '') return;
-      onEdit(task._id, trimmedTitle);
+      onEdit(task.id, trimmedTitle);
       setEditedTitle('');
       setEditing(false);
     };
