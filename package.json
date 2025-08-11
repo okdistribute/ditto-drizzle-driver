@@ -1,0 +1,37 @@
+{
+  "name": "@dittolive/drizzle-driver",
+  "version": "0.1.0",
+  "description": "Drizzle ORM driver for Ditto SDK",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "ditto",
+    "drizzle",
+    "orm",
+    "database",
+    "dql"
+  ],
+  "author": "Ditto",
+  "license": "MIT",
+  "peerDependencies": {
+    "@dittolive/ditto": "^4.11.0",
+    "drizzle-orm": "^0.44.0"
+  },
+  "devDependencies": {
+    "@dittolive/ditto": "^4.12.0-preview.3",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.0",
+    "drizzle-orm": "^0.44.4",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.3.3"
+  }
+}
