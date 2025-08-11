@@ -205,16 +205,6 @@ const observer = db.observe(
   }
 );
 
-// Options for observe
-const observerWithOptions = db.observe(
-  query,
-  callback,
-  {
-    emitInitialValue: true,  // Emit current state immediately (default: true)
-    debounce: 100            // Debounce rapid changes in milliseconds (default: 0)
-  }
-);
-
 // Stop observing when no longer needed
 observer.cancel();
 
@@ -223,8 +213,6 @@ if (observer.isActive) {
   console.log('Observer is still running');
 }
 ```
-
-**Note:** The observe functionality uses Ditto's StoreObserver API which may be experimental in some SDK versions. Please ensure your Ditto SDK version supports store observers before using this feature.
 
 ### Testing
 
