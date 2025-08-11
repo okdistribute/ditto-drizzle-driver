@@ -36,6 +36,9 @@ export function sqlToDql(sql: string, params: any[]): DQLQuery {
  * Translate SELECT statement
  * SQL: SELECT * FROM users WHERE name = ? AND age > ?
  * DQL: SELECT * FROM users WHERE name = :arg1 AND age > :arg2
+ * 
+ * SQL: SELECT COUNT(*), SUM(age) FROM users GROUP BY status
+ * DQL: SELECT COUNT(*), SUM(age) FROM users GROUP BY status
  */
 function translateSelect(sql: string, params: any[]): DQLQuery {
   let dql = sql;
@@ -55,8 +58,32 @@ function translateSelect(sql: string, params: any[]): DQLQuery {
   dql = dql.replace(/"([^"]+)"\."([^"]+)"/g, '$1.$2');
   dql = dql.replace(/"([^"]+)"/g, '$1');
   
+  // Handle aggregate functions - these are supported in DQL
+  // COUNT, SUM, AVG, MIN, MAX are all supported
+  // COUNT(*) is supported directly
+  // DISTINCT is also supported: COUNT(DISTINCT field)
+  
+  // Handle column aliases with AS
+  // SQL: SELECT name AS user_name
+  // DQL: SELECT name AS user_name (supported)
+  
+  // Handle GROUP BY - supported in DQL
+  // SQL: GROUP BY status, age
+  // DQL: GROUP BY status, age (supported)
+  
+  // Handle HAVING - supported in DQL
+  // SQL: HAVING COUNT(*) > 5
+  // DQL: HAVING COUNT(*) > 5 (supported)
+  
   // Map 'id' to '_id' for DQL compatibility
-  dql = dql.replace(/\bid\b/gi, '_id');
+  // Use word boundaries to avoid replacing 'id' in words like 'MID' or 'valid'
+  dql = dql.replace(/\bid\b/gi, (match, offset, str) => {
+    // Check if this is part of 'MID' function
+    if (offset > 0 && str[offset - 1].toUpperCase() === 'M') {
+      return match;
+    }
+    return '_id';
+  });
   
   return { query: dql, args: Object.keys(args).length > 0 ? args : undefined };
 }

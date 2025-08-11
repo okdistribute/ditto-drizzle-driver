@@ -17,6 +17,8 @@ export type DrizzleQuery<T> = {
 
 export class DittoSQLiteDatabase<TSchema extends Record<string, unknown> = Record<string, never>> 
   extends BaseSQLiteDatabase<'async', QueryResult, TSchema> {
+  
+  private dittoStore: any;
 
   constructor(ditto: Ditto, config?: DrizzleConfig<TSchema>) {
     const dialect = new SQLiteAsyncDialect({ casing: config?.casing });
@@ -50,6 +52,7 @@ export class DittoSQLiteDatabase<TSchema extends Record<string, unknown> = Recor
     );
     
     super('async', dialect, session, schema as any);
+    this.dittoStore = ditto.store;
   }
 
   override async transaction<T>(
@@ -57,6 +60,11 @@ export class DittoSQLiteDatabase<TSchema extends Record<string, unknown> = Recor
     config?: DittoSQLiteTransactionConfig
   ): Promise<T> {
     return super.transaction(transaction, config);
+  }
+
+  // Add execute method for direct DQL queries (for debugging/testing)
+  async execute(query: string, args?: Record<string, any>): Promise<QueryResult> {
+    return this.dittoStore.execute(query, args);
   }
 
   // Optional: Add watch functionality similar to PowerSync

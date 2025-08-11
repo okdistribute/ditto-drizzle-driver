@@ -68,6 +68,16 @@ export class DittoSQLitePreparedQuery extends SQLitePreparedQuery<any> {
     
     const rows = await this.values(placeholderValues);
     
+    // Check if this is already processed aggregate data (has expected field names)
+    if (rows.length > 0 && fields) {
+      const firstRow = rows[0];
+      const expectedFieldName = fields[0].path[fields[0].path.length - 1];
+      if (typeof firstRow === 'object' && !Array.isArray(firstRow) && expectedFieldName in firstRow) {
+        // Already processed aggregate results - return as is
+        return rows;
+      }
+    }
+    
     if (customResultMapper) {
       const mappedResult = customResultMapper(rows as unknown[][]);
       return Array.isArray(mappedResult) ? mappedResult : [mappedResult];
@@ -122,6 +132,57 @@ export class DittoSQLitePreparedQuery extends SQLitePreparedQuery<any> {
     
     // Execute the DQL query
     const result = await this.store.execute(dqlQuery.query, dqlQuery.args);
+    
+    // Check if this is an aggregate query (result has items with value containing ($n) keys)
+    const firstItem = result.items[0];
+    const valueObj = firstItem?.value;
+    const isAggregateQuery = result.items.length > 0 && 
+      valueObj && 
+      typeof valueObj === 'object' &&
+      Object.keys(valueObj).some(key => key.match(/^\(\$\d+\)$/));
+    
+    if (isAggregateQuery) {
+      // Handle aggregate results (may include GROUP BY fields)
+      const mappedResults = result.items.map(item => {
+        const resultValues = item.value as Record<string, any>;
+        
+        // Map values to field names
+        if (this.fields) {
+          const mappedResult: Record<string, any> = {};
+          
+          // First, copy any non-aggregate fields (from GROUP BY)
+          for (const key in resultValues) {
+            if (!key.match(/^\(\$\d+\)$/)) {
+              // This is a regular field (not an aggregate)
+              mappedResult[key] = resultValues[key];
+            }
+          }
+          
+          // Then map fields based on their position in the SELECT
+          this.fields.forEach((field, index) => {
+            const fieldName = field.path[field.path.length - 1];
+            
+            // Skip if this field was already copied (GROUP BY field)
+            if (fieldName in mappedResult) {
+              return;
+            }
+            
+            // This must be an aggregate or computed field
+            // Use 1-based index for ($n) keys
+            const aggregateKey = `($${index + 1})`;
+            if (aggregateKey in resultValues) {
+              mappedResult[fieldName] = resultValues[aggregateKey];
+            }
+          });
+          
+          return mappedResult;
+        }
+        
+        // If no fields info, return raw values
+        return resultValues;
+      });
+      return mappedResults;
+    }
     
     // Extract values in array format if needed
     if (this._isResponseInArrayMode && this.fields) {

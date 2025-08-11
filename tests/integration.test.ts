@@ -2,7 +2,7 @@ import { Ditto, DittoConfig } from '@dittolive/ditto';
 import { wrapDittoWithDrizzle } from '../src';
 import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 import { relations } from 'drizzle-orm';
-import { eq, and, gt, like } from 'drizzle-orm';
+import { eq, and, gt, like, sql } from 'drizzle-orm';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -434,6 +434,119 @@ describe('Real Ditto Integration Tests', () => {
       updatedProducts.forEach((p: any) => {
         expect(p.stock).toBe(50);
       });
+    });
+  });
+
+  describe('Aggregates and Projections', () => {
+    beforeEach(async () => {
+      // Insert test data for aggregates
+      const testProducts = [
+        { id: 'agg-1', name: 'Laptop', price: 1000, stock: 2, category: 'Electronics' },
+        { id: 'agg-2', name: 'Mouse', price: 25, stock: 5, category: 'Electronics' },
+        { id: 'agg-3', name: 'Desk', price: 500, stock: 1, category: 'Furniture' },
+        { id: 'agg-4', name: 'Chair', price: 150, stock: 4, category: 'Furniture' },
+        { id: 'agg-5', name: 'Monitor', price: 300, stock: 2, category: 'Electronics' },
+      ];
+      
+      for (const product of testProducts) {
+        await db.insert(products).values(product);
+      }
+    });
+    
+    it('should handle COUNT aggregate', async () => {
+      const result = await db.select({ count: sql`COUNT(*)` })
+        .from(products)
+        .where(like(products.id, 'agg-%'));
+      
+      expect(result).toHaveLength(1);
+      expect(result[0].count).toBe(5);
+    });
+    
+    it('should handle SUM aggregate', async () => {
+      const result = await db.select({ 
+        total: sql<number>`SUM(${products.stock})` 
+      })
+      .from(products)
+      .where(like(products.id, 'agg-%'));
+      
+      expect(result).toHaveLength(1);
+      expect(result[0].total).toBe(14); // 2+5+1+4+2
+    });
+    
+    it('should handle AVG aggregate', async () => {
+      const result = await db.select({ 
+        average: sql<number>`AVG(${products.price})` 
+      })
+      .from(products)
+      .where(like(products.id, 'agg-%'));
+      
+      expect(result).toHaveLength(1);
+      expect(result[0].average).toBeCloseTo(395, 0); // (1000+25+500+150+300)/5
+    });
+    
+    it('should handle MIN and MAX aggregates', async () => {
+      const result = await db.select({ 
+        min: sql<number>`MIN(${products.price})`,
+        max: sql<number>`MAX(${products.price})`
+      })
+      .from(products)
+      .where(like(products.id, 'agg-%'));
+      
+      expect(result).toHaveLength(1);
+      expect(result[0].min).toBe(25);
+      expect(result[0].max).toBe(1000);
+    });
+    
+    it('should handle GROUP BY with aggregates', async () => {
+      const result = await db.select({
+        category: products.category,
+        count: sql<number>`COUNT(*)`,
+        total_stock: sql<number>`SUM(${products.stock})`
+      })
+      .from(products)
+      .where(like(products.id, 'agg-%'))
+      .groupBy(products.category)
+      .orderBy(products.category);
+      
+      expect(result).toHaveLength(2);
+      expect(result[0]).toMatchObject({ 
+        category: 'Electronics', 
+        count: 3,
+        total_stock: 9 // 2+5+2
+      });
+      expect(result[1]).toMatchObject({ 
+        category: 'Furniture', 
+        count: 2,
+        total_stock: 5 // 1+4
+      });
+    });
+    
+    it('should handle DISTINCT selection', async () => {
+      const result = await db.selectDistinct({
+        category: products.category
+      })
+      .from(products)
+      .where(like(products.id, 'agg-%'))
+      .orderBy(products.category);
+      
+      expect(result).toHaveLength(2);
+      expect(result[0].category).toBe('Electronics');
+      expect(result[1].category).toBe('Furniture');
+    });
+    
+    it('should handle column projections', async () => {
+      const result = await db.select({
+        name: products.name,
+        price: products.price
+      })
+      .from(products)
+      .where(eq(products.id, 'agg-1'));
+      
+      expect(result).toHaveLength(1);
+      expect(result[0]).toHaveProperty('name');
+      expect(result[0]).toHaveProperty('price');
+      expect(result[0]).not.toHaveProperty('category');
+      expect(result[0]).not.toHaveProperty('stock');
     });
   });
 
