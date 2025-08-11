@@ -96,30 +96,6 @@ Wraps a Ditto instance with Drizzle ORM capabilities.
 
 Use Drizzle's SQLite schema builders:
 
-> 🚨 **Important: Unsupported Features Will Throw Exceptions**
-> 
-> The driver will throw exceptions when it detects unsupported SQL features to ensure enterprise customers have clear expectations about Ditto's capabilities:
-> 
-> **Features that will throw exceptions:**
-> - **Unique Constraints**: Except on the `id` field (mapped to `_id`)
-> - **Foreign Key References**: Including cascade operations
-> - **Check Constraints**: Not supported by Ditto
-> - **Composite Indexes**: Use single-field indexes instead
-> - **Partial Indexes**: No WHERE clause support in indexes
-> - **Unique Indexes**: Only simple indexes supported
-> - **DROP INDEX**: Indexes cannot be dropped once created
-> - **CREATE/ALTER/DROP TABLE**: Ditto is schemaless
-> - **JOIN Operations**: Use separate queries instead
-> - **Subqueries**: Not supported in DQL
-> - **UNION Operations**: Execute separate queries
-> 
-> **Supported features:**
-> - **Primary Keys**: Only the `id` field (enforced as unique)
-> - **NOT NULL**: Validated at runtime by Drizzle
-> - **Default Values**: Handled by Drizzle during insertion
-> - **Basic CRUD**: SELECT, INSERT, UPDATE, DELETE
-> - **Simple Indexes**: CREATE INDEX for single fields (SDK 4.12.0+)
-
 ```typescript
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
@@ -139,6 +115,28 @@ const badTable = sqliteTable('bad_table', {
 });
 ```
 
+### Real-time Data Observation
+
+The driver includes an `observe()` method that allows you to watch queries for real-time updates.
+
+```typescript
+// Observe active users
+const observer = db.observe(
+  db.select().from(users).where(eq(users.active, true)),
+  (users, metadata) => {
+    console.log('Active users updated:', users);
+    console.log('Has changes:', metadata?.hasChanges);
+  }
+);
+
+// Stop observing when no longer needed
+observer.cancel();
+
+// Check if observer is still active
+if (observer.isActive) {
+  console.log('Observer is still running');
+}
+```
 ### Transactions
 
 ```typescript
@@ -151,25 +149,6 @@ await db.transaction(async (tx) => {
     createdAt: new Date().toISOString()
   });
 });
-```
-
-## SQL to DQL Translation
-
-The driver automatically translates Drizzle's SQL output to DQL:
-
-| SQL | DQL |
-|-----|-----|
-| `SELECT * FROM users WHERE age > ?` | `SELECT * FROM users WHERE age > :arg1` |
-| `INSERT INTO users (name) VALUES (?)` | `INSERT INTO users DOCUMENTS { name: :arg1 }` |
-| `UPDATE users SET name = ? WHERE id = ?` | `UPDATE users SET name = :arg1 WHERE id = :arg2` |
-| `DELETE FROM users WHERE id = ?` | `DELETE FROM users WHERE id = :arg1` |
-
-## Development
-
-### Building
-
-```bash
-npm run build
 ```
 
 ### Indexing
@@ -193,27 +172,23 @@ await db.execute('CREATE INDEX location_idx ON users (address.city)');
 - No unique indexes (uniqueness only enforced on `_id`)
 - No partial indexes (WHERE clauses not supported)
 
-### Real-time Data Observation
+## SQL to DQL Translation
 
-The driver includes an `observe()` method that allows you to watch queries for real-time updates.
+The driver automatically translates Drizzle's SQL output to DQL:
 
-```typescript
-// Observe active users
-const observer = db.observe(
-  db.select().from(users).where(eq(users.active, true)),
-  (users, metadata) => {
-    console.log('Active users updated:', users);
-    console.log('Has changes:', metadata?.hasChanges);
-  }
-);
+| SQL | DQL |
+|-----|-----|
+| `SELECT * FROM users WHERE age > ?` | `SELECT * FROM users WHERE age > :arg1` |
+| `INSERT INTO users (name) VALUES (?)` | `INSERT INTO users DOCUMENTS { name: :arg1 }` |
+| `UPDATE users SET name = ? WHERE id = ?` | `UPDATE users SET name = :arg1 WHERE id = :arg2` |
+| `DELETE FROM users WHERE id = ?` | `DELETE FROM users WHERE id = :arg1` |
 
-// Stop observing when no longer needed
-observer.cancel();
+## Development
 
-// Check if observer is still active
-if (observer.isActive) {
-  console.log('Observer is still running');
-}
+### Building
+
+```bash
+npm run build
 ```
 
 ### Testing
@@ -238,6 +213,30 @@ Unlike traditional SQL databases, Ditto has some limitations:
 2. **No Unique Constraints**: Only the `_id` field is unique (other unique constraints are ignored)
 3. **No Foreign Keys**: Relationships are handled at application level
 5. **No CREATE TABLE**: Table definitions in Drizzle are for type safety only
+
+> 🚨 **Important: Unsupported Features Will Throw Exceptions**
+> 
+> The driver will throw exceptions when it detects unsupported SQL features to ensure enterprise customers have clear expectations about Ditto's capabilities:
+> 
+> **Features that will throw exceptions:**
+> - **Unique Constraints**: Except on the `id` field (mapped to `_id`)
+> - **Foreign Key References**: Including cascade operations
+> - **Check Constraints**: Not supported by Ditto
+> - **Composite Indexes**: Use single-field indexes instead
+> - **Partial Indexes**: No WHERE clause support in indexes
+> - **Unique Indexes**: Only simple indexes supported
+> - **DROP INDEX**: Indexes cannot be dropped once created
+> - **CREATE/ALTER/DROP TABLE**: Ditto is schemaless
+> - **JOIN Operations**: Use separate queries instead
+> - **Subqueries**: Not supported in DQL
+> - **UNION Operations**: Execute separate queries
+> 
+> **Supported features:**
+> - **Primary Keys**: Only the `id` field (enforced as unique)
+> - **NOT NULL**: Validated at runtime by Drizzle
+> - **Default Values**: Handled by Drizzle during insertion
+> - **Basic CRUD**: SELECT, INSERT, UPDATE, DELETE
+> - **Simple Indexes**: CREATE INDEX for single fields (SDK 4.12.0+)
 
 ### Example: Error Handling
 
