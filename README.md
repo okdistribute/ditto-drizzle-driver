@@ -193,7 +193,7 @@ await db.execute('CREATE INDEX location_idx ON users (address.city)');
 
 ### Real-time Data Observation
 
-The driver includes an `observe()` method that allows you to watch queries for real-time updates, similar to PowerSync's watch API:
+The driver includes an `observe()` method that allows you to watch queries for real-time updates.
 
 ```typescript
 // Observe active users
