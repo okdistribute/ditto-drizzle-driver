@@ -220,13 +220,6 @@ if (observer.isActive) {
 npm test
 ```
 
-### Running Examples
-
-```bash
-cd examples
-npx ts-node basic-usage.ts
-```
-
 ## Ditto-Specific Behavior
 
 ### Document IDs
