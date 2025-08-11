@@ -89,6 +89,8 @@ describe('Real Ditto Integration Tests', () => {
       mode: 'smallPeersOnly'
     } as any, testDbPath);
     ditto = await Ditto.open(config);
+
+    await ditto.disableSyncWithV3();
     
     // Wrap with Drizzle
     db = wrapDittoWithDrizzle(ditto, { 

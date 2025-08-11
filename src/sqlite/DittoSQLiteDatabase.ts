@@ -21,7 +21,6 @@ export class DittoSQLiteDatabase<TSchema extends Record<string, unknown> = Recor
   constructor(ditto: Ditto, config?: DrizzleConfig<TSchema>) {
     const dialect = new SQLiteAsyncDialect({ casing: config?.casing });
 
-    ditto.disableSyncWithV3();
     
     let logger;
     if (config?.logger === true) {
