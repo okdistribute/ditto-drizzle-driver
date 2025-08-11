@@ -190,8 +190,6 @@ await db.execute('CREATE INDEX location_idx ON users (address.city)');
 - No composite indexes (use separate indexes for each field)
 - No unique indexes (uniqueness only enforced on `_id`)
 - No partial indexes (WHERE clauses not supported)
-- Indexes cannot be dropped once created
-- Indexes don't work with `observe()` or subscriptions
 
 ### Real-time Data Observation
 
@@ -256,7 +254,6 @@ Unlike traditional SQL databases, Ditto has some limitations:
 1. **No Schema Enforcement**: Ditto is schemaless - tables don't need to be created
 2. **No Unique Constraints**: Only the `_id` field is unique (other unique constraints are ignored)
 3. **No Foreign Keys**: Relationships are handled at application level
-4. **No Transactions**: While the driver supports transaction syntax for compatibility, Ditto doesn't have true ACID transactions
 5. **No CREATE TABLE**: Table definitions in Drizzle are for type safety only
 
 ### Example: Error Handling
