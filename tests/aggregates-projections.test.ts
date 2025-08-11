@@ -190,13 +190,11 @@ describe('Aggregates and Projections', () => {
       expect(result.args).toEqual({ arg1: true, arg2: 5, arg3: 10 });
     });
 
-    it('should handle subqueries in projections', () => {
+    it('should throw error for subqueries', () => {
       const sql = 'SELECT name, (SELECT COUNT(*) FROM orders WHERE user_id = users.id) AS order_count FROM users';
       const params: any[] = [];
       
-      const result = sqlToDql(sql, params);
-      // Note: subqueries may need special handling depending on DQL support
-      expect(result.query).toContain('user_id = users._id');
+      expect(() => sqlToDql(sql, params)).toThrow('Subqueries');
     });
 
     it('should not replace id in MID function', () => {

@@ -104,7 +104,7 @@ describe('SQL to DQL Translation', () => {
       const sql = 'CREATE TABLE users (id INTEGER PRIMARY KEY)';
       const params: any[] = [];
       
-      expect(() => sqlToDql(sql, params)).toThrow('Unsupported SQL statement');
+      expect(() => sqlToDql(sql, params)).toThrow('CREATE TABLE');
     });
 
     it('should throw error for malformed INSERT', () => {

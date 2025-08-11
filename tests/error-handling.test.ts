@@ -31,7 +31,7 @@ describe('Error Handling', () => {
       const sql = 'SELEKT * FORM users';
       const params: any[] = [];
       
-      expect(() => sqlToDql(sql, params)).toThrow('Unsupported SQL statement');
+      expect(() => sqlToDql(sql, params)).toThrow('Unsupported SQL operation');
     });
 
     it('should throw on malformed INSERT', () => {
@@ -55,12 +55,11 @@ describe('Error Handling', () => {
         'CREATE TABLE users (id INT)',
         'DROP TABLE users',
         'ALTER TABLE users ADD COLUMN name TEXT',
-        'CREATE INDEX idx_name ON users(name)',
         'TRUNCATE TABLE users'
       ];
       
       operations.forEach(sql => {
-        expect(() => sqlToDql(sql, [])).toThrow('Unsupported SQL statement');
+        expect(() => sqlToDql(sql, [])).toThrow('Unsupported SQL operation');
       });
     });
   });

@@ -4,6 +4,8 @@
  * More complex SQL features may need additional handling.
  */
 
+import { DittoUnsupportedOperationError } from '../errors/DittoDriverErrors';
+
 export interface DQLQuery {
   query: string;
   args?: Record<string, any>;
@@ -19,6 +21,57 @@ export function sqlToDql(sql: string, params: any[]): DQLQuery {
   // Parse the SQL statement type
   const upperSql = normalizedSql.toUpperCase();
   
+  // Check for unsupported SQL operations
+  if (upperSql.startsWith('CREATE TABLE')) {
+    throw new DittoUnsupportedOperationError(
+      'CREATE TABLE',
+      'Ditto is schemaless and does not require table creation. Define your schema in Drizzle for type safety only.'
+    );
+  }
+  
+  if (upperSql.startsWith('ALTER TABLE')) {
+    throw new DittoUnsupportedOperationError(
+      'ALTER TABLE',
+      'Ditto is schemaless and does not support schema modifications. Update your Drizzle schema for type safety.'
+    );
+  }
+  
+  if (upperSql.startsWith('DROP TABLE')) {
+    throw new DittoUnsupportedOperationError(
+      'DROP TABLE',
+      'Ditto does not support DROP TABLE operations. To remove data, use DELETE queries.'
+    );
+  }
+  
+  // Check for JOINs in any query
+  if (upperSql.includes(' JOIN ') || upperSql.includes(' INNER JOIN ') || 
+      upperSql.includes(' LEFT JOIN ') || upperSql.includes(' RIGHT JOIN ') ||
+      upperSql.includes(' FULL JOIN ') || upperSql.includes(' CROSS JOIN ')) {
+    throw new DittoUnsupportedOperationError(
+      'JOIN',
+      'Ditto does not support JOIN operations. Fetch related data with separate queries and combine in application code.'
+    );
+  }
+  
+  // Check for subqueries (but not quoted column names like "select")
+  // Remove quoted strings first to avoid false positives
+  const sqlWithoutQuotes = upperSql.replace(/"[^"]+"/g, '');
+  if ((sqlWithoutQuotes.match(/\bSELECT\b/g) || []).length > 1) {
+    throw new DittoUnsupportedOperationError(
+      'Subqueries',
+      'Ditto does not support subqueries. Use separate queries and combine results in application code.'
+    );
+  }
+  
+  // Check for UNION
+  if (upperSql.includes(' UNION ')) {
+    throw new DittoUnsupportedOperationError(
+      'UNION',
+      'Ditto does not support UNION operations. Execute separate queries and combine results in application code.'
+    );
+  }
+  
+  // Handle supported operations
   if (upperSql.startsWith('SELECT')) {
     return translateSelect(normalizedSql, params);
   } else if (upperSql.startsWith('INSERT')) {
@@ -27,8 +80,15 @@ export function sqlToDql(sql: string, params: any[]): DQLQuery {
     return translateUpdate(normalizedSql, params);
   } else if (upperSql.startsWith('DELETE')) {
     return translateDelete(normalizedSql, params);
+  } else if (upperSql.startsWith('CREATE INDEX')) {
+    return translateCreateIndex(normalizedSql, params);
+  } else if (upperSql.startsWith('DROP INDEX')) {
+    return translateDropIndex(normalizedSql, params);
   } else {
-    throw new Error(`Unsupported SQL statement: ${normalizedSql.substring(0, 50)}`);
+    throw new DittoUnsupportedOperationError(
+      normalizedSql.substring(0, 50),
+      'Only SELECT, INSERT, UPDATE, DELETE, CREATE INDEX, and DROP INDEX operations are supported.'
+    );
   }
 }
 
@@ -53,37 +113,34 @@ function translateSelect(sql: string, params: any[]): DQLQuery {
     return `:${paramName}`;
   });
   
+  // Store the original SELECT clause before processing 
+  // Check for aggregates to determine if we need special handling
+  // const selectMatch = dql.match(/^(select\s+)(.*?)(\s+from)/i);
+  // const originalSelectClause = selectMatch ? selectMatch[2] : null;
+  // const hasAggregates = originalSelectClause && 
+  //   /\b(COUNT|SUM|AVG|MIN|MAX)\s*\(/i.test(originalSelectClause);
+  
   // Handle SQLite-specific syntax that might need conversion
-  // For example, converting "users"."name" to users.name
+  // First map 'id' to '_id' while quotes are still present
+  // This handles cases like "table"."id" -> "table"."_id"
+  dql = dql.replace(/"id"/g, '"_id"');
+  
+  // Then remove quotes
   dql = dql.replace(/"([^"]+)"\."([^"]+)"/g, '$1.$2');
   dql = dql.replace(/"([^"]+)"/g, '$1');
   
-  // Handle aggregate functions - these are supported in DQL
-  // COUNT, SUM, AVG, MIN, MAX are all supported
-  // COUNT(*) is supported directly
-  // DISTINCT is also supported: COUNT(DISTINCT field)
-  
-  // Handle column aliases with AS
-  // SQL: SELECT name AS user_name
-  // DQL: SELECT name AS user_name (supported)
-  
-  // Handle GROUP BY - supported in DQL
-  // SQL: GROUP BY status, age
-  // DQL: GROUP BY status, age (supported)
-  
-  // Handle HAVING - supported in DQL
-  // SQL: HAVING COUNT(*) > 5
-  // DQL: HAVING COUNT(*) > 5 (supported)
-  
-  // Map 'id' to '_id' for DQL compatibility
-  // Use word boundaries to avoid replacing 'id' in words like 'MID' or 'valid'
-  dql = dql.replace(/\bid\b/gi, (match, offset, str) => {
+  // Also map any remaining unquoted 'id' to '_id'
+  dql = dql.replace(/\bid\b/g, (match, offset, str) => {
     // Check if this is part of 'MID' function
     if (offset > 0 && str[offset - 1].toUpperCase() === 'M') {
       return match;
     }
     return '_id';
   });
+  
+  // For now, keep table qualifications as they are - DQL supports them
+  
+  // DQL supports ORDER BY and GROUP BY, so keep them as is
   
   return { query: dql, args: Object.keys(args).length > 0 ? args : undefined };
 }
@@ -198,6 +255,91 @@ function translateDelete(sql: string, params: any[]): DQLQuery {
   dql = dql.replace(/\bid\b/gi, '_id');
   
   return { query: dql, args: Object.keys(args).length > 0 ? args : undefined };
+}
+
+/**
+ * Translate CREATE INDEX statement
+ * SQL: CREATE INDEX idx_name ON table_name (column_name)
+ * SQL: CREATE UNIQUE INDEX idx_name ON table_name (column_name)
+ * DQL: CREATE INDEX idx_name ON table_name (column_name)
+ * Note: Ditto doesn't support UNIQUE indexes, composite indexes, or partial indexes
+ */
+function translateCreateIndex(sql: string, _params: any[]): DQLQuery {
+  // Parse CREATE INDEX statement
+  // Patterns to match:
+  // CREATE INDEX idx_name ON table (column)
+  // CREATE INDEX IF NOT EXISTS idx_name ON table (column)
+  // CREATE UNIQUE INDEX idx_name ON table (column) - will throw error
+  
+  const upperSql = sql.toUpperCase();
+  
+  // Check for unsupported index types
+  if (upperSql.includes('UNIQUE INDEX')) {
+    throw new DittoUnsupportedOperationError(
+      'UNIQUE INDEX',
+      'Ditto does not support UNIQUE indexes. Only simple indexes are supported.'
+    );
+  }
+  
+  // Match the CREATE INDEX pattern - only accept simple column names
+  const indexMatch = sql.match(/CREATE\s+INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?(\w+)["']?\s+ON\s+["']?(\w+)["']?\s*\(([\w\s.,"`']+)\)/i);
+  
+  if (!indexMatch) {
+    throw new Error(`Unable to parse CREATE INDEX statement: ${sql}`);
+  }
+  
+  const indexName = indexMatch[1];
+  const tableName = indexMatch[2];
+  const columnsStr = indexMatch[3].trim();
+  
+  // Parse columns - check for composite index
+  const columns = columnsStr.split(',').map(col => col.trim().replace(/["']/g, ''));
+  
+  if (columns.length > 1) {
+    throw new DittoUnsupportedOperationError(
+      'Composite INDEX',
+      'Ditto does not support composite indexes. Create separate indexes for each field.'
+    );
+  }
+  
+  // Check for partial index (WHERE clause)
+  if (upperSql.includes(' WHERE ')) {
+    throw new DittoUnsupportedOperationError(
+      'Partial INDEX',
+      'Ditto does not support partial indexes with WHERE clauses.'
+    );
+  }
+  
+  const columnName = columns[0];
+  
+  // Map 'id' to '_id' for consistency
+  const mappedColumn = columnName === 'id' ? '_id' : columnName;
+  
+  // Build DQL CREATE INDEX statement
+  let dql = `CREATE INDEX`;
+  
+  // Add IF NOT EXISTS if present
+  if (upperSql.includes('IF NOT EXISTS')) {
+    dql += ` IF NOT EXISTS`;
+  }
+  
+  dql += ` ${indexName} ON ${tableName} (${mappedColumn})`;
+  
+  return { query: dql };
+}
+
+/**
+ * Translate DROP INDEX statement
+ * SQL: DROP INDEX idx_name
+ * SQL: DROP INDEX IF EXISTS idx_name
+ * DQL: Currently Ditto doesn't support dropping indexes
+ */
+function translateDropIndex(_sql: string, _params: any[]): DQLQuery {
+  // Ditto doesn't currently support dropping indexes
+  throw new DittoUnsupportedOperationError(
+    'DROP INDEX',
+    'Ditto does not currently support dropping indexes. Indexes are permanent once created.'
+  );
 }
 
 /**

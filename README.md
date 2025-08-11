@@ -50,6 +50,12 @@ const allUsers = await db.select().from(users);
   - UPDATE with conditions
   - DELETE with conditions
   
+- **Indexing** (SDK 4.12.0+)
+  - CREATE INDEX for improved query performance
+  - Single-field indexes
+  - Nested field indexes with dot notation
+  - IF NOT EXISTS clause support
+  
 - **Transactions**
   - Read-only and read-write transactions
   - Automatic rollback on errors
@@ -84,34 +90,51 @@ Wraps a Ditto instance with Drizzle ORM capabilities.
 
 **Returns:** A Drizzle database instance configured for Ditto
 
-### Schema Definition
+### Schema Definition & Constraints
 
 Use Drizzle's SQLite schema builders:
 
+> 🚨 **Important: Unsupported Features Will Throw Exceptions**
+> 
+> The driver will throw exceptions when it detects unsupported SQL features to ensure enterprise customers have clear expectations about Ditto's capabilities:
+> 
+> **Features that will throw exceptions:**
+> - **Unique Constraints**: Except on the `id` field (mapped to `_id`)
+> - **Foreign Key References**: Including cascade operations
+> - **Check Constraints**: Not supported by Ditto
+> - **Composite Indexes**: Use single-field indexes instead
+> - **Partial Indexes**: No WHERE clause support in indexes
+> - **Unique Indexes**: Only simple indexes supported
+> - **DROP INDEX**: Indexes cannot be dropped once created
+> - **CREATE/ALTER/DROP TABLE**: Ditto is schemaless
+> - **JOIN Operations**: Use separate queries instead
+> - **Subqueries**: Not supported in DQL
+> - **UNION Operations**: Execute separate queries
+> 
+> **Supported features:**
+> - **Primary Keys**: Only the `id` field (enforced as unique)
+> - **NOT NULL**: Validated at runtime by Drizzle
+> - **Default Values**: Handled by Drizzle during insertion
+> - **Basic CRUD**: SELECT, INSERT, UPDATE, DELETE
+> - **Simple Indexes**: CREATE INDEX for single fields (SDK 4.12.0+)
+
 ```typescript
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import { relations } from 'drizzle-orm';
 
-const posts = sqliteTable('posts', {
-  id: text('id').primaryKey(),
-  title: text('title').notNull(),
-  content: text('content'),
-  authorId: text('author_id').notNull(),
-  createdAt: text('created_at').notNull()
-});
-
+// ✅ GOOD: Simple schema without constraints
 const users = sqliteTable('users', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull()
+  id: text('id').primaryKey(),  // Primary key is enforced
+  name: text('name').notNull(),  // Runtime validation only
+  email: text('email'),          // No unique constraint
+  age: integer('age')
 });
 
-// Define relations (optional)
-const postsRelations = relations(posts, ({ one }) => ({
-  author: one(users, {
-    fields: [posts.authorId],
-    references: [users.id]
-  })
-}));
+// ❌ BAD: Will throw DittoUnsupportedConstraintError
+const badTable = sqliteTable('bad_table', {
+  id: text('id').primaryKey(),
+  email: text('email').unique(),  // THROWS: Unique constraint not supported
+  user_id: text('user_id').references(() => users.id)  // THROWS: Foreign keys not supported
+});
 ```
 
 ### Transactions
@@ -147,6 +170,64 @@ The driver automatically translates Drizzle's SQL output to DQL:
 npm run build
 ```
 
+### Indexing
+
+Create indexes to improve query performance on large datasets (requires SDK 4.12.0+):
+
+```typescript
+// Create an index using the helper method
+await db.createIndex('users', 'email');
+await db.createIndex('users', 'age', 'custom_age_index');
+
+// Or use raw DQL execution
+await db.execute('CREATE INDEX IF NOT EXISTS email_idx ON users (email)');
+
+// Index nested fields
+await db.execute('CREATE INDEX location_idx ON users (address.city)');
+```
+
+**Index Limitations:**
+- No composite indexes (use separate indexes for each field)
+- No unique indexes (uniqueness only enforced on `_id`)
+- No partial indexes (WHERE clauses not supported)
+- Indexes cannot be dropped once created
+- Indexes don't work with `observe()` or subscriptions
+
+### Real-time Data Observation
+
+The driver includes an `observe()` method that allows you to watch queries for real-time updates, similar to PowerSync's watch API:
+
+```typescript
+// Observe active users
+const observer = db.observe(
+  db.select().from(users).where(eq(users.active, true)),
+  (users, metadata) => {
+    console.log('Active users updated:', users);
+    console.log('Has changes:', metadata?.hasChanges);
+  }
+);
+
+// Options for observe
+const observerWithOptions = db.observe(
+  query,
+  callback,
+  {
+    emitInitialValue: true,  // Emit current state immediately (default: true)
+    debounce: 100            // Debounce rapid changes in milliseconds (default: 0)
+  }
+);
+
+// Stop observing when no longer needed
+observer.cancel();
+
+// Check if observer is still active
+if (observer.isActive) {
+  console.log('Observer is still running');
+}
+```
+
+**Note:** The observe functionality uses Ditto's StoreObserver API which may be experimental in some SDK versions. Please ensure your Ditto SDK version supports store observers before using this feature.
+
 ### Testing
 
 ```bash
@@ -158,6 +239,67 @@ npm test
 ```bash
 cd examples
 npx ts-node basic-usage.ts
+```
+
+## Ditto-Specific Behavior
+
+### Document IDs
+- Ditto uses `_id` as the document identifier
+- The driver automatically maps Drizzle's `id` field to Ditto's `_id`
+- Document IDs must be unique within a collection (enforced by Ditto)
+- Attempting to insert a document with an existing ID will fail with an "Identifier conflict" error
+
+### Limitations
+
+Unlike traditional SQL databases, Ditto has some limitations:
+
+1. **No Schema Enforcement**: Ditto is schemaless - tables don't need to be created
+2. **No Unique Constraints**: Only the `_id` field is unique (other unique constraints are ignored)
+3. **No Foreign Keys**: Relationships are handled at application level
+4. **No Transactions**: While the driver supports transaction syntax for compatibility, Ditto doesn't have true ACID transactions
+5. **No CREATE TABLE**: Table definitions in Drizzle are for type safety only
+
+### Example: Error Handling
+
+```typescript
+import { DittoUnsupportedConstraintError, DittoUnsupportedOperationError } from '@dittolive/drizzle-driver';
+
+// Schema validation errors (thrown at initialization)
+try {
+  const db = wrapDittoWithDrizzle(ditto, {
+    schema: {
+      users: sqliteTable('users', {
+        id: text('id').primaryKey(),
+        email: text('email').unique()  // Will throw!
+      })
+    }
+  });
+} catch (error) {
+  if (error instanceof DittoUnsupportedConstraintError) {
+    console.error('Schema contains unsupported constraints:', error.message);
+  }
+}
+
+// Runtime SQL operation errors
+try {
+  // Attempting a JOIN will throw
+  await db.select()
+    .from(users)
+    .innerJoin(posts, eq(users.id, posts.userId));
+} catch (error) {
+  if (error instanceof DittoUnsupportedOperationError) {
+    console.error('Unsupported operation:', error.message);
+    // Suggestion provided: "Fetch related data with separate queries"
+  }
+}
+
+// Primary key enforcement (still works)
+try {
+  await db.insert(users).values({ id: '1', name: 'John' });
+  await db.insert(users).values({ id: '1', name: 'Jane' }); // Duplicate ID
+} catch (error) {
+  // Error: "Identifier conflict on document '1'"
+}
 ```
 
 ## Contributing

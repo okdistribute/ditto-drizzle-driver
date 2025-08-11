@@ -79,6 +79,15 @@ describe('Real Ditto Integration Tests', () => {
   let db: any;
   let testDbPath: string;
 
+  // Test schema with unique constraints for warning test
+  const schemaWithUniqueConstraints = {
+    testTable: sqliteTable('test_unique', {
+      id: text('id').primaryKey(),
+      email: text('email').unique(),
+      username: text('username').unique()
+    })
+  };
+
   beforeEach(async () => {
     // Create a unique test database path
     testDbPath = createTestDbPath('integration');
@@ -574,8 +583,9 @@ describe('Real Ditto Integration Tests', () => {
         });
         fail('Should have thrown duplicate key error');
       } catch (error: any) {
-        // Error is expected
+        // Error is expected - Ditto enforces uniqueness on _id
         expect(error).toBeDefined();
+        expect(error.message).toContain('Identifier conflict');
       }
       
       // Verify original is unchanged
@@ -592,6 +602,250 @@ describe('Real Ditto Integration Tests', () => {
       } catch (error: any) {
         expect(error).toBeDefined();
       }
+    });
+  });
+
+  describe('Schema Validation Errors', () => {
+    it('should throw error for unique constraints in schema', async () => {
+      // Create a new Ditto instance for this test
+      const warnTestPath = createTestDbPath('warning-test');
+      const warnConfig = new DittoConfig('test-app-id', {
+        mode: 'smallPeersOnly'
+      } as any, warnTestPath);
+      const warnDitto = await Ditto.open(warnConfig);
+      await warnDitto.disableSyncWithV3();
+
+      try {
+        // This should now throw an error
+        expect(() => {
+          wrapDittoWithDrizzle(warnDitto, {
+            schema: schemaWithUniqueConstraints,
+            logger: false
+          });
+        }).toThrow('UNIQUE constraints');
+      } finally {
+        await warnDitto.close();
+        cleanupTestDb(warnTestPath);
+      }
+    });
+  });
+
+  // Uncomment these tests when the feature is stable
+  describe('Observe Functionality', () => {
+    it('should observe query changes', (done) => {
+      const now = new Date().toISOString();
+      const observedData: any[] = [];
+      
+      // Start observing users table
+      const query = db.select().from(users).where(like(users.id, 'observe-%'));
+      const observer = db.observe(
+        query,
+        (data: any[], metadata: any) => {
+          observedData.push({ data: [...data], metadata });
+          
+          // After receiving updates
+          if (observedData.length >= 2) {
+            // Find the update with data
+            const updateWithData = observedData.find(d => d.data.length > 0);
+            
+            if (updateWithData) {
+              // Verify we got the inserted data
+              expect(updateWithData.data).toHaveLength(1);
+              expect(updateWithData.data[0].name).toBe('Observable User');
+              expect(updateWithData.metadata?.hasChanges).toBe(true);
+              
+              observer.cancel();
+              done();
+            }
+          }
+        }
+      );
+      
+      // Wait a bit for initial emission then insert data
+      setTimeout(async () => {
+        // Insert data that should trigger the observer
+        await db.insert(users).values({
+          id: 'observe-1',
+          name: 'Observable User',
+          email: 'observe@test.com',
+          age: 25,
+          created_at: now
+        });
+      }, 100);
+    });
+    
+    it('should support multiple observers', async () => {
+      const now = new Date().toISOString();
+      const observer1Data: any[] = [];
+      const observer2Data: any[] = [];
+      
+      // Create two observers with different queries
+      const observer1 = db.observe(
+        db.select().from(users).where(eq(users.age, 30)),
+        (data: any[]) => {
+          observer1Data.push([...data]);
+        },
+        { emitInitialValue: false }
+      );
+      
+      const observer2 = db.observe(
+        db.select().from(users).where(eq(users.age, 40)),
+        (data: any[]) => {
+          observer2Data.push([...data]);
+        },
+        { emitInitialValue: false }
+      );
+      
+      // Insert data for observer1
+      await db.insert(users).values({
+        id: 'multi-observe-1',
+        name: 'User 30',
+        email: 'user30@test.com',
+        age: 30,
+        created_at: now
+      });
+      
+      // Insert data for observer2
+      await db.insert(users).values({
+        id: 'multi-observe-2',
+        name: 'User 40',
+        email: 'user40@test.com',
+        age: 40,
+        created_at: now
+      });
+      
+      // Wait for observers to process
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Verify each observer only received relevant data
+      expect(observer1Data.length).toBeGreaterThan(0);
+      expect(observer1Data[observer1Data.length - 1]).toHaveLength(1);
+      expect(observer1Data[observer1Data.length - 1][0].age).toBe(30);
+      
+      expect(observer2Data.length).toBeGreaterThan(0);
+      expect(observer2Data[observer2Data.length - 1]).toHaveLength(1);
+      expect(observer2Data[observer2Data.length - 1][0].age).toBe(40);
+      
+      // Cleanup
+      observer1.cancel();
+      observer2.cancel();
+    });
+    
+    it('should handle observer cancellation', async () => {
+      const now = new Date().toISOString();
+      let callCount = 0;
+      
+      const observer = db.observe(
+        db.select().from(users).where(like(users.id, 'cancel-%')),
+        () => {
+          callCount++;
+        }
+      );
+      
+      // Should be active initially
+      expect(observer.isActive).toBe(true);
+      
+      // Cancel the observer
+      observer.cancel();
+      expect(observer.isActive).toBe(false);
+      
+      // Insert data - should not trigger callback
+      await db.insert(users).values({
+        id: 'cancel-1',
+        name: 'Should Not Trigger',
+        email: 'cancel@test.com',
+        age: 50,
+        created_at: now
+      });
+      
+      // Wait to ensure no callback
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Should only have initial callback if emitInitialValue was true
+      expect(callCount).toBeLessThanOrEqual(1);
+    });
+    
+    it('should support debouncing', (done) => {
+      const now = new Date().toISOString();
+      const observedData: any[] = [];
+      let insertsDone = false;
+      
+      const observer = db.observe(
+        db.select().from(users).where(like(users.id, 'debounce-%')),
+        (data: any[]) => {
+          observedData.push({ 
+            count: data.length, 
+            timestamp: Date.now() 
+          });
+          
+          // Check after inserts are done and we have data
+          if (insertsDone && data.length === 3) {
+            // Verify we got all 3 items
+            expect(data.length).toBe(3);
+            
+            // With debouncing, we should have fewer emissions than without
+            // (initial + debounced updates)
+            expect(observedData.length).toBeLessThanOrEqual(4);
+            
+            observer.cancel();
+            done();
+          }
+        },
+        { debounce: 150 }
+      );
+      
+      // Wait for initial emission then insert rapidly
+      setTimeout(async () => {
+        // Insert multiple items rapidly
+        for (let i = 1; i <= 3; i++) {
+          await db.insert(users).values({
+            id: `debounce-${i}`,
+            name: `Debounce User ${i}`,
+            email: `debounce${i}@test.com`,
+            age: 20 + i,
+            created_at: now
+          });
+          // Small delay between inserts
+          await new Promise(resolve => setTimeout(resolve, 30));
+        }
+        insertsDone = true;
+      }, 50);
+    }, 10000);
+    
+    it('should skip initial value when configured', async () => {
+      const observedData: any[] = [];
+      
+      const observer = db.observe(
+        db.select().from(users).where(like(users.id, 'skip-initial-%')),
+        (data: any[]) => {
+          observedData.push(data.length);
+        },
+        { emitInitialValue: false }
+      );
+      
+      // Wait to ensure no initial emission
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Should have no emissions yet
+      expect(observedData).toHaveLength(0);
+      
+      // Insert data
+      await db.insert(users).values({
+        id: 'skip-initial-1',
+        name: 'Test User',
+        email: 'skip@test.com',
+        age: 35,
+        created_at: new Date().toISOString()
+      });
+      
+      // Wait for observer to process
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Should have exactly one emission (no initial)
+      expect(observedData).toHaveLength(1);
+      expect(observedData[0]).toBe(1);
+      
+      observer.cancel();
     });
   });
 });
