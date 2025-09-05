@@ -177,15 +177,11 @@ const App = () => {
 
   const toggleTask = async (task: Task) => {
     try {
-      const query = db.current
+      await db.current
         ?.update(tasksTable)
         .set({ done: !task.done })
         .where(eq(tasksTable.id, task.id));
       
-      if (query) {
-        const sql = query.toSQL();
-        await query;
-      }
     } catch (error) {
       console.error('Failed to toggle task:', error);
     }
